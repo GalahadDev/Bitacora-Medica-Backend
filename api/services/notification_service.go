@@ -93,6 +93,12 @@ func (s *NotificationService) createAndNotify(userID uuid.UUID, notifType string
 	}
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("PANIC in notification goroutine", "recover", r)
+			}
+		}()
+
 		if err := db.Create(&notif).Error; err != nil {
 			slog.Error("Failed to save notification DB", "error", err)
 		}
@@ -103,7 +109,9 @@ func (s *NotificationService) createAndNotify(userID uuid.UUID, notifType string
 			return
 		}
 
+		slog.Info("Attempting to send email", "to", user.Email, "type", notifType)
 		s.sendRealEmail(user.Email, subject, htmlBody)
+		slog.Info("Email send function returned", "to", user.Email)
 	}()
 }
 
@@ -118,6 +126,7 @@ func (s *NotificationService) sendRealEmail(to string, subject string, htmlBody 
 		htmlBody)
 
 	addr := fmt.Sprintf("%s:%s", s.cfg.SMTPHost, s.cfg.SMTPPort)
+	slog.Info("Dialing SMTP server...", "address", addr, "host", s.cfg.SMTPHost)
 	if err := smtp.SendMail(addr, auth, s.cfg.SMTPEmail, []string{to}, msg); err != nil {
 		slog.Error("❌ Email failed", "to", to, "error", err)
 	} else {
@@ -168,8 +177,8 @@ func (s *NotificationService) NotifyAccountStatus(userID uuid.UUID, status domai
 func (s *NotificationService) NotifyIncident(patientID uuid.UUID, incidentDetails string) {
 	db := database.GetDB()
 	var patient domains.Patient
-
-	db.Preload("PersonalInfo").First(&patient, "id = ?", patientID)
+	// PersonalInfo es JSONB, se carga automÃ¡ticamente, no requiere Preload
+	db.First(&patient, "id = ?", patientID)
 
 	patientName := "Paciente ID " + patientID.String()
 	pName := s.getNameFromProfile(patient.PersonalInfo)
